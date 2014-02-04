@@ -46,6 +46,47 @@ signal_worker() {
   fi
 }
 
+sidekiq_is_running() {
+   test -n "`ps -ef | egrep sidekiq.*busy\|ruby.*sidekiq.yml | egrep -v grep\|sidekiq_web`"
+   echo $?
+}
+
+wait_for_sidekiq_shutdown() {
+   local wait_seconds="$1"
+   local waitchar="$2"
+
+   local cnt=0
+   while [ "`sidekiq_is_running`" == "0" -a $cnt -lt $wait_seconds ]; do
+      sleep 1
+      cnt=$(expr $cnt + 1)
+
+      if [ -n "$waitchar" ]; then
+         echo -n $waitchar
+      fi
+   done
+
+   echo " "
+
+   if [ $cnt -ge $wait_seconds ]; then
+      return 1
+   else
+      return 0
+   fi
+}
+
+kill_worker_if_necessary() {
+   local wait_seconds="60"
+   local dot="."
+
+   wait_for_sidekiq_shutdown $wait_seconds $dot
+   if [ "$?" == "0" ]; then
+      return 0
+   fi
+
+   SIG="KILL"
+   signal_worker
+}
+
 lock(){
   RESULT=0
   if [ -e $LOCK_FILE ]; then
@@ -172,6 +213,7 @@ if [ -d $APP_ROOT ]; then
       legacy_fix
       lock
       signal_worker
+      kill_worker_if_necessary
       [ -e "$LOCK_FILE" ] && rm $LOCK_FILE
       unlock_and_exit_cleanly  
       ;;
